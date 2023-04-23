@@ -7,8 +7,10 @@
 #include <cstdlib>
 #include <math.h>
 #include <vector>
+#include <unordered_map>
 #include <numeric>
 #include <string>
+#include <iostream>
 #include <emp-tool/emp-tool.h>
 #include "sequential_2pc_sh.h"
 #include "sequential_2pc_exec_sh.h"
@@ -24,7 +26,8 @@ class TinyGarblePI_SH{
 	SequentialC2PC_SH* twopc;
 	
 	vector<int64_t> input, output;
-	vector<uint64_t> bit_width_A, bit_width_B;	
+	vector<uint64_t> bit_width_A, bit_width_B;
+	unordered_map<string, CircuitFile*> CFs;
 	
 	block* labels_A;
 	block* labels_B;
@@ -36,7 +39,13 @@ class TinyGarblePI_SH{
 		this->io = io;		
 		twopc = new SequentialC2PC_SH(io, party);
 		io->flush();
-	}	
+	}
+	~TinyGarblePI_SH(){
+		delete twopc;
+		for(const auto& kv: CFs){
+			delete kv.second;
+		}
+	}
 
 	/***register inputs from Alice or Bob, must be followed by gen_input_labels and retrieve_input_labels***/
 	
@@ -307,7 +316,7 @@ class TinyGarblePI_SH{
 				for (uint64_t i2 = 0; i2 < len2; i2++)
 					for (uint64_t i3 = 0; i3 < len3; i3++)
 						retrieve_input_labels(retreived_vector_labels[i0][i1][i2][i3], owner, bit_width);
-	}	
+	}
 
 	/***reveal secret variable***/
 	
@@ -383,9 +392,10 @@ class TinyGarblePI_SH{
 	
 	void fun(block*& y_x, block* a_x, block* b_x, uint64_t bit_width, string op){
 		string netlist_address = string(NETLIST_PATH_PI) + op + "_" + to_string(bit_width) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;
-		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);
+		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);
 	}
 	void fun(block*& y_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b, string op){
 		uint64_t bit_width = MAX(bit_width_a, bit_width_b);
@@ -426,6 +436,17 @@ class TinyGarblePI_SH{
 	void lt(block*& y_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b){
 		fun(y_x, a_x, b_x, bit_width_a, bit_width_b, "lt");
 	}
+
+	/*y = a == b*/
+	void eq(block*& y_x, block* a_x, auto b_x, uint64_t bit_width){
+		block* xor_ab = new block[bit_width + 1];
+		xor_(xor_ab, a_x, b_x, bit_width);
+		auto tmp = xor_ab + bit_width;
+		assign(tmp, (int64_t)0, 1);
+		// cout << "eq reveal: " << reveal(xor_ab, bit_width + 1) << endl;
+		lt(y_x, xor_ab, 1, bit_width + 1);
+		delete[] xor_ab;
+	}
 	
 	/*y = max(a, b)*/
 	void max(block*& y_x, block* a_x, auto b_x, uint64_t bit_width){
@@ -445,9 +466,10 @@ class TinyGarblePI_SH{
 	
 	void logic(block*& y_x, block* a_x, block* b_x, uint64_t bit_width, string op){
 		string netlist_address = string(NETLIST_PATH_PI) + op + "_" + to_string(bit_width) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;
-		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);
+		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);
 	}
 	void logic(block*& y_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b, string op){
 		uint64_t bit_width = MAX(bit_width_a, bit_width_b);
@@ -540,9 +562,10 @@ class TinyGarblePI_SH{
 	/*y = a * b*/
 	void mult(block*& y_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b){
 		string netlist_address = string(NETLIST_PATH_PI) + "mult_" + to_string(bit_width_a) + "_" + to_string(bit_width_b) + "_" + to_string(bit_width_a+bit_width_b-1) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;
-		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);
+		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);
 	}
 	void mult(block*& y_x, block* a_x, block* b_x, uint64_t bit_width){
 		mult(y_x, a_x, b_x, bit_width, bit_width);
@@ -570,7 +593,8 @@ class TinyGarblePI_SH{
 	void mat_mult(uint64_t row_A, uint64_t inner, uint64_t col_B, auto &A, auto &B, auto &C, int64_t rs_bits, uint64_t bit_width_A, uint64_t bit_width_B, uint64_t bit_width_C, uint64_t bit_width_G){
 	
 		string netlist_address = string(NETLIST_PATH_PI) + "mac_" + to_string(bit_width_A) + "_" + to_string(bit_width_B) + "_" + to_string(bit_width_G) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = inner, repeat = 1, output_mode = 3;
 		
 		block* labels_A = new block[row_A*inner*bit_width_A];
@@ -589,7 +613,7 @@ class TinyGarblePI_SH{
 			
 		for (uint64_t i = 0; i < row_A; i++){
 			for (uint64_t j = 0; j < col_B; j++){
-				sequential_2pc_exec_sh(twopc, labels_B+j*inner*bit_width_B, labels_A+i*inner*bit_width_A, nullptr, labels_C, party, io, &cf, cycles, repeat, output_mode);
+				sequential_2pc_exec_sh(twopc, labels_B+j*inner*bit_width_B, labels_A+i*inner*bit_width_A, nullptr, labels_C, party, io, cf, cycles, repeat, output_mode);
 				right_shift(labels_C, rs_bits, bit_width_G);
 				assign(C[i][j], labels_C, bit_width_C);
 				cout << fixed << setprecision(2) << setfill('0');
@@ -606,9 +630,10 @@ class TinyGarblePI_SH{
 	/*y = a / b*/
 	void div(block*& y_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b){
 		string netlist_address = string(NETLIST_PATH_PI) + "div_" + to_string(bit_width_a) + "_" + to_string(bit_width_b) + "_" + to_string(bit_width_a) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;
-		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);
+		sequential_2pc_exec_sh(twopc, b_x, a_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);
 	}
 	void div(block*& y_x, block* a_x, block* b_x, uint64_t bit_width){
 		div(y_x, a_x, b_x, bit_width, bit_width);
@@ -620,9 +645,10 @@ class TinyGarblePI_SH{
 		memcpy(ab_x, b_x, bit_width*sizeof(block));
 		memcpy(ab_x + bit_width, a_x, bit_width*sizeof(block));		
 		string netlist_address = string(NETLIST_PATH_PI) + "ifelse_" + to_string(bit_width) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;	
-		sequential_2pc_exec_sh(twopc, c_x, ab_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);		
+		sequential_2pc_exec_sh(twopc, c_x, ab_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);		
 		delete[] ab_x;
 	}
 	void ifelse(block*& y_x, block* c_x, block* a_x, block* b_x, uint64_t bit_width_a, uint64_t bit_width_b){
@@ -641,9 +667,10 @@ class TinyGarblePI_SH{
 		memcpy(ab_x, b_x, bit_width*sizeof(block));
 		memcpy(ab_x + bit_width, a_x, bit_width*sizeof(block));		
 		string netlist_address = string(NETLIST_PATH_PI) + "ifelse_" + to_string(bit_width) + "bit.emp.bin";	
-		CircuitFile cf(netlist_address.c_str(), true);
+		// CircuitFile cf(netlist_address.c_str(), true);
+		auto cf = getCF(netlist_address);
 		uint64_t cycles = 1, repeat = 1, output_mode = 2;	
-		sequential_2pc_exec_sh(twopc, c_x, ab_x, nullptr, y_x, party, io, &cf, cycles, repeat, output_mode);		
+		sequential_2pc_exec_sh(twopc, c_x, ab_x, nullptr, y_x, party, io, cf, cycles, repeat, output_mode);		
 		delete[] ab_x;
 		clear_TG_int(b_x);
 	}
@@ -660,6 +687,17 @@ class TinyGarblePI_SH{
 		and_(a_x, a_x, mask_x, bit_width);
 		delete[] sign_x;
 		delete[] mask_x;
+	}
+
+	CircuitFile* getCF(const string& netlist_address){
+		auto iter = CFs.find(netlist_address);
+		if(iter != CFs.end())
+			return iter->second;
+		else{
+			auto cf = new CircuitFile(netlist_address.c_str(), true);
+			CFs.emplace(netlist_address, cf);
+			return cf;
+		}
 	}
 	
 };	

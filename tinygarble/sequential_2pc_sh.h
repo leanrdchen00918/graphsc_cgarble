@@ -33,6 +33,10 @@ class SequentialC2PC_SH { public:
 	SequentialC2PC_SH(NetIO * io, int party) {
 		this->party = party;
 		this->io = io;
+
+		block seed;
+		memset(&seed, 0, sizeof(block));
+		prg.reseed(&seed);
 		
 		ote = new SHOTExtension<NetIO>(io);
 		

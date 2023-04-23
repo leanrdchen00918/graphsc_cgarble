@@ -1,3 +1,5 @@
+set(CMAKE_C_COMPILER "/usr/bin/gcc-9")
+set(CMAKE_CXX_COMPILER "/usr/bin/g++-9")
 cmake_minimum_required (VERSION 3.1)
 project (tinygarble)
 set(NAME "tinygarble")
@@ -36,13 +38,20 @@ macro (add_exec _name)
 	target_link_libraries(${_name}  ${RELIC_LIBRARIES} ${OPENSSL_LIBRARIES} ${Boost_LIBRARIES} ${GMP_LIBRARIES} ${TINYGARBLE_LIBRARIES})
 endmacro()
 
+macro (add_app _path _name)
+	add_executable(${_name} "exec/${_path}${_name}.cpp")
+	target_link_libraries(${_name}  ${RELIC_LIBRARIES} ${OPENSSL_LIBRARIES} ${Boost_LIBRARIES} ${GMP_LIBRARIES} ${TINYGARBLE_LIBRARIES})
+endmacro()
+
 add_exec(TinyGarble)
 add_exec(TinyGarblePI)
 add_exec(eval_TinyGarble)
 add_exec(formatInOut)
 add_exec(readCircuitFile)
 add_exec(LeNet)
-add_exec(millionaire)
+add_app(examples/millionare/ millionaire)
+add_app(examples/pr/ pagerank)
+add_app(examples/test/ test)
 
 configure_file("tinygarble/TinyGarble_config.h.in" "tinygarble/TinyGarble_config.h" @ONLY)
 
