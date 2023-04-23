@@ -5,16 +5,14 @@
 #include "PageRankNode.h"
 using namespace std;
 class SetInitialPageRankGadget: public Gadget {
-	vector<GraphNode*> prNodes;
     public:
 	SetInitialPageRankGadget(TinyGarblePI_SH* TGPI_SH, Machine* machine): Gadget(machine, TGPI_SH) {}
 
-	SetInitialPageRankGadget* setInputs(vector<GraphNode*> prNodes) {
-		this->prNodes = prNodes;
+	SetInitialPageRankGadget* setInputs() {
 		return this;
 	}
-
-	virtual void secureCompute() override {
+	virtual void secureCompute() override {}
+	virtual void secureCompute(vector<GraphNode*>& prNodes) override {
 		// T[] one = env.inputOfAlice(Utils.fromFixPoint(1, PageRankNode.WIDTH, PageRankNode.OFFSET));
 		// T[] zero = env.inputOfAlice(Utils.fromFixPoint(0, PageRankNode.WIDTH, PageRankNode.OFFSET));
         auto one = TGPI_SH->TG_int(PageRankNode::WIDTH);

@@ -3,6 +3,7 @@
 #include <emp-tool/emp-tool.h>
 #include <boost/program_options.hpp>
 #include <boost/format.hpp>
+#include <vector>
 #include "tinygarble/program_interface.h"
 #include "tinygarble/program_interface_sh.h"
 #include "tinygarble/TinyGarble_config.h"
@@ -25,12 +26,14 @@ class Machine {
     // TinyGarblePI* TGPI = nullptr;
     TinyGarblePI_SH* TGPI_SH = nullptr;
     NetIO* partyIO = nullptr;
-	NetIO** peersUp = nullptr;
-	NetIO** peersDown = nullptr;
+	vector<NetIO*> logPeersUp; // logPeersUp[i] connects to peer (gId - (1 << i))
+	vector<NetIO*> logPeersDown; // logPeersDown[i] connects to peer (gId + (1 << i))
+    vector<NetIO*> fullPeersUp; // fullPeersUp[i] connects to peer (gId - i - 1)
+	vector<NetIO*> fullPeersDown; // fullPeersDown[i] connects to peer (gId + i + 1)
 
     
-	int numberOfIncomingConnections;
-	int numberOfOutgoingConnections;
+	// int numberOfIncomingConnections;
+	// int numberOfOutgoingConnections;
 
     Machine(int garblerId,
             int peerPort,
@@ -41,8 +44,6 @@ class Machine {
             // TinyGarblePI* TGPI
             ) : garblerId(garblerId), totalMachines(totalMachines), isGen(isGen), inputLength(inputLength), peerPort(peerPort), localMode(localMode){
         this->logMachines = (int)log2(totalMachines);
-        this->numberOfIncomingConnections = getNumberOfIncomingConnections(garblerId);
-        this->numberOfOutgoingConnections = getNumberOfIncomingConnections(totalMachines - garblerId - 1);
     
         // set default peer port
         if (this->peerPort == -1) this->peerPort = isGen ? 50000 : 55000; 
@@ -58,8 +59,10 @@ class Machine {
 
         if(logMachines > 0){
             // peersDown/Up newed, init at length numberOfIncoming/OutGoingConnections
-            this->peersDown = new NetIO*[numberOfIncomingConnections];
-            this->peersUp = new NetIO*[numberOfOutgoingConnections];
+            this->fullPeersDown = vector<NetIO*>(totalMachines - garblerId - 1);
+            this->fullPeersUp = vector<NetIO*>(garblerId);
+            this->logPeersDown = vector<NetIO*>(getNumberOfLogPeers(garblerId));
+            this->logPeersUp = vector<NetIO*>(getNumberOfLogPeers(totalMachines - garblerId - 1));
             // connect to peers
             connect();
         }
@@ -109,7 +112,7 @@ class Machine {
         cout << "machine initialized." << endl;
     }
 
-    int getNumberOfIncomingConnections(int machineId){
+    int getNumberOfLogPeers(int machineId){
         int k = 0;
         while(true){
             if (machineId >= totalMachines - (1 << k)) return k;
@@ -121,76 +124,34 @@ class Machine {
 		// TODO(kartiknayak): This may necessitate 2^x input length
         listenFromPeer();
         connectToPeers();
-
-        // if (garblerId == 0) {
-        // 	setRInFile();
-        // }
-        // if (garblerId > 0) {
-        // 	GCGenComp.R = GCSignal.receive(peersUp[0]);
-        // 	setRInFile();
-        // }
-        // if (garblerId < totalMachines - 1) {
-        // 	GCGenComp.R.send(peersDown[0]);
-        // 	peersDown[0].flush();
-        // }
-//        debug(" " + env.getParty() + " connected?");
 	}
 
     void listenFromPeer(){
-		// Socket clientSock = null;
-		// ServerSocket serverSocket = new ServerSocket(port);
-        for (int i = 0; i < numberOfIncomingConnections; i++) {
-            int port = peerPort + garblerId * logMachines + i;
+        for (int i = 0; i < fullPeersDown.size(); i++) {
+            int port = peerPort + garblerId * totalMachines + i;
             cout << "listening on port: " << port << endl;
             NetIO* io = new NetIO(nullptr, port);
             io->set_nodelay();
-            peersDown[i] = io;
-            // cout << "connceted" << endl;
-            // io->send_data(&garblerId, sizeof(int));
-            // io->flush();
-            // int id;
-            // io->recv_data(&id, sizeof(int));
-            // cout << "id received: " << id << endl;
-            // int index = (int)log2(id - garblerId);
-            // peersDown[index] = io;
-        	// clientSock = serverSocket.accept();
-        	// OutputStream os = new BufferedOutputStream(clientSock.getOutputStream());
-        	// InputStream     is = new BufferedInputStream(clientSock.getInputStream());
-        	// Network channel = new Network(is, os, clientSock);
-        	// int id = channel.readInt();
-			// int index = Utils.log2(id - garblerId);
-			// debug("Accepted a connection from " + id + ". Stored at index " + index);
-			// peersDown[index] = channel;
-			// debug(id + " peerIsDown " + peersDown[index].hashCode());
+            fullPeersDown[i] = io;
+            // check whether add to logPeersDown or not
+            if(((i + 1) & i) == 0){ // diff = (peerId - gId) is 2^k
+                logPeersDown[(int)log2(i + 1)] = io;
+            }
         }
-        // serverSocket.close();
 	}
 
 	void connectToPeers(){
-		for (int i = 0; i < numberOfOutgoingConnections; i++) {
-            // TODO: use correct IP
-            int peerId = garblerId - (1 << i), dstPort = peerPort + peerId * logMachines + i;
+		for (int i = 0; i < fullPeersUp.size(); i++) {
+            int peerId = garblerId - 1 - i, dstPort = peerPort + peerId * totalMachines + i;
             string peer_ip = getIPByID(peerId, isGen);
             cout << "connecting to " << peer_ip << " at port: " << dstPort << endl;
             NetIO* io = new NetIO(peer_ip.c_str(), dstPort);
             io->set_nodelay();
-            // cout << "connected" << endl;
-            // int id;
-            // io->recv_data(&id, sizeof(int));
-            // cout << "id received: " << id << endl;
-            // assert(peerId == id);
-            // io->send_data(&garblerId, sizeof(int));
-            // io->flush();
-            // cout << "id sent: " << garblerId << endl;
-            peersUp[i] = io;
-			// debug("I'm trying to connect to " + (garblerId - (1 << i)) + " at " + (peerPort + garblerId - (1 << i)) + ". Storing connection at " + i);
-			// String peerIp = null;
-			// peerIp = isGen ? IPManager.gIp[(garblerId - (1 << i))] : IPManager.eIp[(garblerId - (1 << i))];
-			// peersUp[i] = new Client();
-			// ((Client) peersUp[i]).connect(peerIp, peerPort + garblerId - (1 << i));
-			// peersUp[i].writeInt(garblerId);
-			// peersUp[i].flush();
-			// debug((garblerId - (1 << i)) + "peerOsUp " + peersUp[i].hashCode());
+            fullPeersUp[i] = io;
+            // check whether add to logPeersUp or not
+            if(((i + 1) & i) == 0){ // diff = (peerId - gId) is 2^k
+                logPeersUp[(int)log2(i + 1)] = io;
+            }
 		}
 		// debug("I'm done connecting ");
 	}
@@ -200,14 +161,12 @@ class Machine {
         delete TGPI_SH;
         // delete TGPI;
         delete partyIO;
-        for(int i = 0; i < numberOfIncomingConnections; i++){
-            delete peersDown[i];
+        for(int i = 0; i < fullPeersDown.size(); i++){
+            delete fullPeersDown[i];
         }
-        for(int i = 0; i < numberOfOutgoingConnections; i++){
-            delete peersUp[i];
+        for(int i = 0; i < fullPeersUp.size(); i++){
+            delete fullPeersUp[i];
         }
-        delete[] peersUp;
-        delete[] peersDown;
     }
 
     string getIPByID(int gId, bool isGen){

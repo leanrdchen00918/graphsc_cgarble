@@ -4,20 +4,19 @@
 #include <iostream>
 #include "Gadget.h"
 #include "GraphNodeBitonicSortLib.h"
+#include "Utils.h"
 class SortGadget: public Gadget {
     public:
-	vector<GraphNode*> nodes;
 	NodeComparator* comp;
 
 	SortGadget(Machine *machine, TinyGarblePI_SH* TGPI_SH): Gadget(machine, TGPI_SH){}
 
-	SortGadget* setInputs(vector<GraphNode*> nodes, NodeComparator* comp) {
-		this->nodes = nodes;
+	SortGadget* setInputs(NodeComparator* comp) {
 		this->comp = comp;
 		return this;
 	}
-
-	virtual void secureCompute() override {
+	virtual void secureCompute() override {}
+	virtual void secureCompute(vector<GraphNode*>& nodes) override {
 		long totalComm = 0, totalComp = 0, totalSort = 0;
 		auto startSort = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
 		GraphNodeBitonicSortLib* lib = new GraphNodeBitonicSortLib(comp, TGPI_SH);
@@ -40,11 +39,12 @@ class SortGadget: public Gadget {
 				bool up = (machine->garblerId / diff) % 2 == 1 ? true : false;
 				NetIO* channel;
 				int commMachine = (int)log2(diff);
-				channel = up ? machine->peersUp[commMachine] : machine->peersDown[commMachine];
+				channel = up ? machine->logPeersUp[commMachine] : machine->logPeersDown[commMachine];
 
 				// long startCommunicate = System.nanoTime();
 				auto startComm = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
-				auto receivedNodes = sendReceive(channel, nodes, nodes.size(), up);
+				// TODO: check if template deduction is correct
+				auto receivedNodes = sendReceive(channel, nodes, up, TGPI_SH);
 				totalComm += chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count() - startComm;
 				// long endCommunicate = System.nanoTime(), startConcatenate = System.nanoTime();
 
@@ -95,59 +95,6 @@ class SortGadget: public Gadget {
 		// 	+ machine.getGarblerId() + " , total: " + total / 1000000.0 + "ms, compute: " + compute / 1000000.0 + " ms, comm: " + communicate / 1000000.0 + " ms");
 		// return communicate;
         
-	}
-
-	vector<GraphNode*> sendReceive(NetIO* channel, const vector<GraphNode*>& nodes, int arrayLength, bool up){
-	    // cout << "enter sendReceive" << endl;
-		auto a = vector<GraphNode*>(arrayLength);
-        for(int i = 0; i < a.size(); i++){
-            a[i] = nodes[0]->alloc_obj();
-        }
-		int toTransfer = nodes.size();
-		int i = 0, j = 0;
-		while (toTransfer > 0) {
-			int curTransfer = min(toTransfer, 8);
-			toTransfer -= curTransfer;
-			if(up){
-				for (int k = 0; k < curTransfer; k++, i++) {
-					nodes[i]->send(channel, TGPI_SH);
-				}
-				channel->flush();
-				// cout << "up done send(one round)" << endl;
-				for (int k = 0; k < curTransfer; k++, j++) {
-					a[j]->read(channel, TGPI_SH);
-				}
-				// cout << "up done read(one round)" << endl;
-			}
-			else{
-				for (int k = 0; k < curTransfer; k++, j++) {
-					a[j]->read(channel, TGPI_SH);
-				}
-				// cout << "down done read(one round)" << endl;
-				for (int k = 0; k < curTransfer; k++, i++) {
-					nodes[i]->send(channel, TGPI_SH);
-				}
-				channel->flush();
-				// cout << "down done send(one round)" << endl;
-			}
-			
-		}
-		// machine.commCnt += nodes.length;
-		// System.out.println("commCnt: " + machine.getCommCnt());
-		
-		// machine.commRoundCnt += 1;
-		// cout << "done sendReceive" << endl;
-		return a;
-	}
-
-	vector<GraphNode*> concatenate(const vector<GraphNode*>& A, const vector<GraphNode*>& B) {
-        auto C = vector<GraphNode*>();
-        C.insert(C.end(), A.begin(), A.end());
-        C.insert(C.end(), B.begin(), B.end());
-        // TGPI_SH->assign(C, A, aLen);
-        // auto tmp = C + aLen;
-        // TGPI_SH->assign(tmp, B, bLen);
-	    return C;
 	}
 };
 #endif

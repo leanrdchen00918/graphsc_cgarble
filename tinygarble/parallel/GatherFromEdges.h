@@ -6,45 +6,53 @@
 #include "Gadget.h"
 #include "GraphNode.h"
 #include "SortGadget.h"
+#include "RevealSortGadget.h"
 using namespace std;
 class GatherFromEdges: public Gadget{
     public:
-	vector<GraphNode*> nodes;
 	bool isEdgeIncoming;
+	bool useRevealSort;
 	GraphNode* identityNode;
+	Gadget* sortGadget;
 
     GraphNode* (*aggFunc)(GraphNode* agg, GraphNode* b, TinyGarblePI_SH* TGPI_SH);
     void (*writeToVertex)(GraphNode* agg, GraphNode* vertex, TinyGarblePI_SH* TGPI_SH);
 
-	GatherFromEdges(TinyGarblePI_SH* TGPI_SH, Machine* machine, bool isEdgeIncoming, GraphNode* identityNode, auto aggFunc, auto writeToVertex)
-    : Gadget(machine, TGPI_SH), isEdgeIncoming(isEdgeIncoming), identityNode(identityNode), aggFunc(aggFunc), writeToVertex(writeToVertex){}
-
-	GatherFromEdges* setInputs(vector<GraphNode*> nodes) {
-		this->nodes = nodes;
-		return this;
+	GatherFromEdges(TinyGarblePI_SH* TGPI_SH, Machine* machine, bool isEdgeIncoming, bool useRevealSort, GraphNode* identityNode, auto aggFunc, auto writeToVertex)
+    : Gadget(machine, TGPI_SH), isEdgeIncoming(isEdgeIncoming), useRevealSort(useRevealSort), identityNode(identityNode), aggFunc(aggFunc), writeToVertex(writeToVertex){
+		this->sortGadget = (useRevealSort) ? (new RevealSortGadget(machine, TGPI_SH)) : nullptr;
+	}
+	~GatherFromEdges(){
+		delete sortGadget;
 	}
 
-    virtual void secureCompute() override {
-		auto start = clock();
-		// long startInit = System.nanoTime();
+	GatherFromEdges* setInputs() {
+		return this;
+	}
+	virtual void secureCompute() override {}
+    virtual void secureCompute(vector<GraphNode*>& nodes) override {
+		// auto start = clock();
+		auto start = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count();
 		if (isEdgeIncoming) {
 			for (auto node: nodes) {
 				node->swapEdgeDirections();
 			}
 		}
 
-		// long startSort = System.nanoTime();
-		// long communicate = (long) new SortGadget<T>(env, machine)
-		// 	.setInputs(nodes, nodes[0].getComparator(env, true /* isVertexLast */))
-		// 	.secureCompute();
-		// long sortTime = (System.nanoTime() - startSort);
-		// machine.times[4] += sortTime;
-
-		(new SortGadget(machine, TGPI_SH))
-		->setInputs(nodes, nodes[0]->getComparator(TGPI_SH, true))
-		->secureCompute();
-
-		cout << "		done gather-sort in: " << double(clock() - start) / CLOCKS_PER_SEC << "s" << endl;
+		if(!useRevealSort){
+			(new SortGadget(machine, TGPI_SH))
+			->setInputs(nodes[0]->getComparator(TGPI_SH, true))
+			->secureCompute(nodes);
+		}
+		else{
+			// shuffle B -> sorted dst list
+			(dynamic_cast<RevealSortGadget*>(sortGadget))
+			->setInputs(nodes[0]->getComparator(TGPI_SH, true), false)
+			->secureCompute(nodes);
+		}
+		auto sortTime = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count() - start;
+		cout << "		done shuffle B -> sorted dst list in: " << sortTime << "ms" << endl;
+		// cout << "		done gather-sort in: " << double(clock() - start) / CLOCKS_PER_SEC << "s" << endl;
 		// cout << "done sort in gather: " << endl;
 		// for(auto node: nodes){
 		// 	node->printNode(TGPI_SH);
@@ -53,7 +61,6 @@ class GatherFromEdges: public Gadget{
 
         auto graphNodeVal = identityNode->getCopy(TGPI_SH);
         auto zeroNode = identityNode->alloc_obj()->set_zero(TGPI_SH); // initialized as ZERO
-		// zeroNode->free_obj();
 
 		for (auto node: nodes) {
 			auto tempAgg = aggFunc(graphNodeVal, node, TGPI_SH);
@@ -66,33 +73,23 @@ class GatherFromEdges: public Gadget{
 
 		auto nodeValForLaterComp = identityNode->getCopy(TGPI_SH);
 
-		int noOfIncomingConnections = machine->numberOfIncomingConnections;
-		int noOfOutgoingConnections = machine->numberOfOutgoingConnections;
+		int noOfIncomingConnections = machine->logPeersDown.size();
+		int noOfOutgoingConnections = machine->logPeersUp.size();
 		for (int k = 0; k < machine->logMachines; k++) {
 			if (noOfIncomingConnections > 0) {
-				// long one = System.nanoTime();
-
-				machine->peersDown[k]->send_data(nodes[nodes.size() - 1]->u, sizeof(block) * 16);
-				graphNodeVal->send(machine->peersDown[k], TGPI_SH);
-				machine->peersDown[k]->flush();
+				machine->logPeersDown[k]->send_data(nodes[nodes.size() - 1]->u, sizeof(block) * 16);
+				graphNodeVal->send(machine->logPeersDown[k], TGPI_SH);
+				machine->logPeersDown[k]->flush();
 				noOfIncomingConnections--;
-
-				// long two = System.nanoTime();
-				// communicate += (two - one);
 			}
 			if (noOfOutgoingConnections > 0) {
-				// long one = System.nanoTime();
                 auto prevU = TGPI_SH->TG_int(16);
-				machine->peersUp[k]->recv_data(prevU, sizeof(block) * 16);
+				machine->logPeersUp[k]->recv_data(prevU, sizeof(block) * 16);
 				auto graphNodeRead = identityNode->alloc_obj();
-				graphNodeRead->read(machine->peersUp[k], TGPI_SH);
-
-				// long two = System.nanoTime();
-				// communicate += (two - one);
+				graphNodeRead->read(machine->logPeersUp[k], TGPI_SH);
 
                 auto sameU = TGPI_SH->TG_int(1);
 				TGPI_SH->eq(sameU, prevU, nodes[0]->u, 16);
-				// T sameU = lib.eq(prevU, nodes[0].u);
 				auto tempAgg = aggFunc(nodeValForLaterComp, graphNodeRead, TGPI_SH);
 				nodeValForLaterComp->mux(nodeValForLaterComp, tempAgg, sameU, TGPI_SH);
 				noOfOutgoingConnections--;
@@ -111,18 +108,32 @@ class GatherFromEdges: public Gadget{
 			tempAgg->free_obj();
 		}
 
+		auto compTime = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count() - start - sortTime;
+		cout << "		done compute in: " << compTime << "ms" << endl;
+		
+		if(useRevealSort){
+			// sorted dst list -> shuffle B
+			(dynamic_cast<RevealSortGadget*>(sortGadget))
+			->setInputs(nodes[0]->getComparator(TGPI_SH, true), true)
+			->secureCompute(nodes);
+		}
+		sortTime = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count() - start - sortTime - compTime;
+		cout << "		done sorted dst list -> shuffle B in: " << sortTime << "ms" << endl;
+
+
 		if (isEdgeIncoming) {
 			for (auto node: nodes) {
 				node->swapEdgeDirections();
 			}
 		}
-		// machine.times[3] += (System.nanoTime() - startInit - sortTime);
 		
         graphNodeVal->free_obj();
         zeroNode->free_obj();
         nodeValForLaterComp->free_obj();
-		// return communicate;
-		cout << "	done gather in: " << double(clock() - start) / CLOCKS_PER_SEC << "s" << endl;
+
+		auto totalTime = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch()).count() - start;
+		cout << "	done gather in: " << totalTime << "ms" << endl;
+		// cout << "	done gather in: " << double(clock() - start) / CLOCKS_PER_SEC << "s" << endl;
 	}
 };
 #endif

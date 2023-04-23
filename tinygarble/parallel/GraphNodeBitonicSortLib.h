@@ -58,7 +58,6 @@ class GraphNodeBitonicSortLib{
         TGPI_SH->xor_(swap, lessthan, dir, 1);
 		// cout << "reach cmp&swap" << endl;
 
-		// auto ni_members = nodes[i]->get_member_ptrs(), nj_members = nodes[j]->get_member_ptrs();
 		auto node_bit_widths = nodes[i]->get_member_bit_widths();
 
     	auto ni = nodes[i]->flatten(TGPI_SH);
@@ -78,18 +77,9 @@ class GraphNodeBitonicSortLib{
 
 			offset += member_bit_width;
 		}
-        // TGPI_SH->ifelse(s, swap, ni, nj, node_bit_width);
-        // TGPI_SH->xor_(s, s, ni, node_bit_width);
-
-        // TGPI_SH->xor_(nj, nj, s, node_bit_width);
-        // TGPI_SH->xor_(ni, ni, s, node_bit_width);
 
     	nodes[i]->unflatten(nj, TGPI_SH);
     	nodes[j]->unflatten(ni, TGPI_SH);
-
-		// cout << "after swap:" << endl;
-		// nodes[i]->printNode(TGPI_SH);
-		// nodes[j]->printNode(TGPI_SH);
 
         TGPI_SH->clear_TG_int(lessthan);
         TGPI_SH->clear_TG_int(swap);

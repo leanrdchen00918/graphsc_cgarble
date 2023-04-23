@@ -119,13 +119,13 @@ void compute(auto machine){
 	if(machine->garblerId % 2 == 0){
 		a = a1;
 		b = b1;
-		io = machine->peersDown[0];
+		io = machine->logPeersDown[0];
 		up = false;
 	}
 	else{
 		a = a2;
 		b = b2;
-		io = machine->peersUp[0];
+		io = machine->logPeersUp[0];
 		up = true;
 	}
 	if(TGPI->party == ALICE){
